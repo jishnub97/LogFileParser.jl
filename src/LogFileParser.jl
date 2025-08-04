@@ -5,7 +5,8 @@ using BitFlags
 function parse_structured_logs(filepath::String;
         schema::NamedTuple=(;),
         filter_msg::Union{Nothing,String}=nothing,
-        filter_module::Union{Nothing,String}=nothing)
+        filter_module::Union{Nothing,String}=nothing,
+        )
 
     parsed_entries = Vector{Dict{String, Any}}()
     current_entry = Vector{String}()
@@ -13,21 +14,22 @@ function parse_structured_logs(filepath::String;
     for line in eachline(filepath)
         is_new_entry = startswith(line, '┌') || occursin(r"^\[\s*\w+:\s", line)
         if is_new_entry && !isempty(current_entry)
-            flush_entry!(parsed_entries, current_entry, schema, filter_msg, filter_module)
+            flush_entry!(parsed_entries, current_entry, schema; filter_msg, filter_module)
         end
         push!(current_entry, line)
     end
 
-    flush_entry!(parsed_entries, current_entry, schema, filter_msg, filter_module)
+    flush_entry!(parsed_entries, current_entry, schema; filter_msg, filter_module)
 
     return parsed_entries
 end
 
 function flush_entry!(parsed_entries::Vector{Dict{String, Any}},
                       current_entry::Vector{String},
-                      schema::NamedTuple,
+                      schema::NamedTuple;
                       filter_msg::Union{Nothing,String},
-                      filter_module::Union{Nothing,String})
+                      filter_module::Union{Nothing,String},
+                      )
     if isempty(current_entry)
         return
     end
@@ -35,9 +37,9 @@ function flush_entry!(parsed_entries::Vector{Dict{String, Any}},
     first_line = current_entry[1]
 
     result = if startswith(first_line, '┌')
-        parse_structured(current_entry, schema, filter_msg, filter_module)
+        parse_structured(current_entry, schema; filter_msg, filter_module)
     elseif occursin(r"^\[\s*\w+:\s", first_line)
-        parse_single_line(first_line, filter_msg)
+        parse_single_line(first_line; filter_msg)
     else
         nothing
     end
@@ -50,9 +52,10 @@ function flush_entry!(parsed_entries::Vector{Dict{String, Any}},
 end
 
 function parse_structured(entry_lines::Vector{String},
-                          schema::NamedTuple,
+                          schema::NamedTuple;
                           filter_msg::Union{Nothing,String},
-                          filter_module::Union{Nothing,String})
+                          filter_module::Union{Nothing,String},
+                          )
     entry = Dict{String, Any}()
 
     header_match = match(r"┌ (\w+): (.+)", entry_lines[1])
@@ -75,11 +78,7 @@ function parse_structured(entry_lines::Vector{String},
             key = Symbol(key_str)
             if haskey(schema, key)
                 T = schema[key]
-                parsed_value = try
-                    parse(T, strip(val_str))
-                catch
-                    nothing
-                end
+                parsed_value = tryparse(T, strip(val_str))
                 if parsed_value === nothing
                     return nothing
                 end
@@ -92,9 +91,7 @@ function parse_structured(entry_lines::Vector{String},
         return nothing
     end
 
-    for (k, v) in key_values
-        entry[string(k)] = v
-    end
+    entry["keys"] = key_values
 
     footer_match = match(r"└ @ (\S+) (\S+):(\d+)", entry_lines[end])
     if footer_match !== nothing
@@ -110,7 +107,7 @@ function parse_structured(entry_lines::Vector{String},
     return entry
 end
 
-function parse_single_line(line::String,
+function parse_single_line(line::String;
                            filter_msg::Union{Nothing,String})
     match_obj = match(r"^\[\s*(\w+):\s+(.+?)\s*\]?$", line)
     if match_obj === nothing
@@ -133,16 +130,6 @@ function find_matching_keys(parsed_log_entries::Vector{Dict{String,Any}}, match_
     return matching_entries
 end
 
-function refine_keys(parsed_log_entries::Vector{Dict{String,Any}}, keys_to_match::Vector{String})
-    refined_entries = Dict{String, Any}[]
-    for entry in parsed_log_entries
-        if all(key->haskey(entry, key), keys_to_match)
-            push!(refined_entries, entry)
-        end
-    end
-    return refined_entries
-end
-
 @bitflag MatchFlags::UInt8 begin
     None = 0x00
     OpeningMessage = 0x01
@@ -150,11 +137,10 @@ end
 end
 const BothMessages = OpeningMessage | ClosingMessage
 
-function find_mismatched(parsed_log_entries::Vector{Dict{String,Any}}, keys_to_match::Vector{String}; opening_message::String, closing_message::String)
-    refined_log_entries = refine_keys(parsed_log_entries, keys_to_match)
-    matched = Dict([k=>entry[k] for k in keys_to_match] => None for entry in refined_log_entries)
-    for entry in refined_log_entries
-        k = [k=>entry[k] for k in keys_to_match]
+function find_mismatched(parsed_log_entries::Vector{Dict{String,Any}}; opening_message::String, closing_message::String)
+    matched = Dict(entry["keys"] => None for entry in parsed_log_entries)
+    for entry in parsed_log_entries
+        k = entry["keys"]
         if haskey(entry, "message") && occursin(opening_message, entry["message"])
             matched[k] |= OpeningMessage
         end
