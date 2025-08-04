@@ -3,7 +3,7 @@ module LogFileParser
 using BitFlags
 
 function parse_structured_logs(filepath::String;
-        schema::NamedTuple=(;),
+        schema::Type{<:NamedTuple},
         filter_msg::Union{Nothing,String}=nothing,
         filter_module::Union{Nothing,String}=nothing,
         )
@@ -26,7 +26,7 @@ end
 
 function flush_entry!(parsed_entries::Vector{Dict{String, Any}},
                       current_entry::Vector{String},
-                      schema::NamedTuple;
+                      schema::Type{<:NamedTuple};
                       filter_msg::Union{Nothing,String},
                       filter_module::Union{Nothing,String},
                       )
@@ -52,7 +52,7 @@ function flush_entry!(parsed_entries::Vector{Dict{String, Any}},
 end
 
 function parse_structured(entry_lines::Vector{String},
-                          schema::NamedTuple;
+                          schema::Type{<:NamedTuple};
                           filter_msg::Union{Nothing,String},
                           filter_module::Union{Nothing,String},
                           )
@@ -70,14 +70,16 @@ function parse_structured(entry_lines::Vector{String},
         return nothing
     end
 
+    schema_keys = fieldnames(schema)
+
     key_values = Dict{Symbol, Any}()
     for line in entry_lines[2:end-1]
         var_match = match(r"│\s+(\w+)\s+=\s+(.+)", line)
         if var_match !== nothing
             key_str, val_str = var_match.captures
             key = Symbol(key_str)
-            if haskey(schema, key)
-                T = schema[key]
+            if key in schema_keys
+                T = fieldtype(schema, key)
                 parsed_value = tryparse(T, strip(val_str))
                 if parsed_value === nothing
                     return nothing
@@ -87,11 +89,11 @@ function parse_structured(entry_lines::Vector{String},
         end
     end
 
-    if !isempty(schema) && !all(k -> haskey(key_values, k), keys(schema))
+    if !all(k -> haskey(key_values, k), schema_keys)
         return nothing
     end
 
-    entry["keys"] = key_values
+    entry["keys"] = schema(Tuple(key_values[k] for k in schema_keys))
 
     footer_match = match(r"└ @ (\S+) (\S+):(\d+)", entry_lines[end])
     if footer_match !== nothing
@@ -120,10 +122,10 @@ function parse_single_line(line::String;
     return Dict("level" => level, "message" => message)
 end
 
-function find_matching_keys(parsed_log_entries::Vector{Dict{String,Any}}, match_keys = Pair{String,Any}[])
-    matching_entries = Dict{String,Any}[]
+function find_matching_keys(parsed_log_entries::Vector{Dict{String,Any}}, match_keys = (;))
+    matching_entries = empty(parsed_log_entries)
     for entry in parsed_log_entries
-        if all(get(entry, k, nothing) == v for (k,v) in match_keys)
+        if all(get(entry["keys"], k, nothing) == v for (k,v) in pairs(match_keys))
             push!(matching_entries, entry)
         end
     end
