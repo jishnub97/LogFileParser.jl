@@ -2,3 +2,9 @@ name = "LogFileParser"
 uuid = "7be95656-526e-4c8c-a314-989a0093c087"
 authors = ["Jishnu Bhattacharya <jishnu@temple.capital>"]
 version = "0.1.0"
+
+[deps]
+BitFlags = "d1d4a3ce-64b1-5f1a-9ba4-7e7e69966f35"
+
+[compat]
+BitFlags = "0.1.9"

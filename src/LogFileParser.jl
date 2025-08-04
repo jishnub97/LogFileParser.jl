@@ -1,5 +1,7 @@
 module LogFileParser
 
+using BitFlags
+
 function parse_structured_logs(filepath::String;
         schema::NamedTuple=(;),
         filter_msg::Union{Nothing,String}=nothing,
@@ -131,14 +133,36 @@ function find_matching_keys(parsed_log_entries::Vector{Dict{String,Any}}, match_
     return matching_entries
 end
 
-function refine_keys(parsed_log_entries::Vector{Dict{String,Any}}, keys_to_keep::Vector{String})
+function refine_keys(parsed_log_entries::Vector{Dict{String,Any}}, keys_to_match::Vector{String})
     refined_entries = Dict{String, Any}[]
     for entry in parsed_log_entries
-        if all(key->haskey(entry, key), keys_to_keep)
+        if all(key->haskey(entry, key), keys_to_match)
             push!(refined_entries, entry)
         end
     end
     return refined_entries
+end
+
+@bitflag MatchFlags::UInt8 begin
+    None = 0x00
+    OpeningMessage = 0x01
+    ClosingMessage = 0x02
+end
+const BothMessages = OpeningMessage | ClosingMessage
+
+function find_mismatched(parsed_log_entries::Vector{Dict{String,Any}}, keys_to_match::Vector{String}; opening_message::String, closing_message::String)
+    refined_log_entries = refine_keys(parsed_log_entries, keys_to_match)
+    matched = Dict([k=>entry[k] for k in keys_to_match] => None for entry in refined_log_entries)
+    for entry in refined_log_entries
+        k = [k=>entry[k] for k in keys_to_match]
+        if haskey(entry, "message") && occursin(opening_message, entry["message"])
+            matched[k] |= OpeningMessage
+        end
+        if haskey(entry, "message") && occursin(closing_message, entry["message"])
+            matched[k] |= ClosingMessage
+        end
+    end
+    return Dict(k=>v for (k, v) in matched if v ∉ (BothMessages, None))
 end
 
 end # module LogFileParser
