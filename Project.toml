@@ -1,0 +1,4 @@
+name = "LogFileParser"
+uuid = "7be95656-526e-4c8c-a314-989a0093c087"
+authors = ["Jishnu Bhattacharya <jishnu@temple.capital>"]
+version = "0.1.0"
