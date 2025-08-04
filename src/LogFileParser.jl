@@ -51,6 +51,9 @@ function flush_entry!(parsed_entries::Vector{Dict{String, Any}},
     empty!(current_entry)
 end
 
+nonmissing(::Type{Union{Missing,T}}) where {T} = T
+nonmissing(::Type{T}) where {T} = T
+
 function parse_structured(entry_lines::Vector{String},
                           schema::Type{<:NamedTuple};
                           filter_msg::Union{Nothing,String},
@@ -77,10 +80,10 @@ function parse_structured(entry_lines::Vector{String},
         var_match = match(r"│\s+(\w+)\s+=\s+(.+)", line)
         if var_match !== nothing
             key_str, val_str = var_match.captures
-            key = Symbol(key_str)
+            key = Symbol(strip(key_str))
             if key in schema_keys
                 T = fieldtype(schema, key)
-                parsed_value = tryparse(T, strip(val_str))
+                parsed_value = tryparse(nonmissing(T), strip(val_str))
                 if parsed_value === nothing
                     return nothing
                 end
@@ -89,11 +92,7 @@ function parse_structured(entry_lines::Vector{String},
         end
     end
 
-    if !all(k -> haskey(key_values, k), schema_keys)
-        return nothing
-    end
-
-    entry["keys"] = schema(Tuple(key_values[k] for k in schema_keys))
+    entry["keys"] = schema(Tuple(get(key_values, k, missing) for k in schema_keys))
 
     footer_match = match(r"└ @ (\S+) (\S+):(\d+)", entry_lines[end])
     if footer_match !== nothing
@@ -130,6 +129,10 @@ function find_matching_keys(parsed_log_entries::Vector{Dict{String,Any}}, match_
         end
     end
     return matching_entries
+end
+
+function filter_for_keys(parsed_log_entries::Vector{Dict{String,Any}}, keys_to_match)
+    [entry for entry in parsed_log_entries if all(!ismissing(get(entry["keys"], Symbol(k), missing)) for k in keys_to_match)]
 end
 
 @bitflag MatchFlags::UInt8 begin
